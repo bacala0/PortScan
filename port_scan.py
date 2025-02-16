@@ -16,7 +16,27 @@ import signal
 import sys
 import asyncio
 
-#variables globales
+#clases personalizadas para conexiones:
+
+#esta clase va a servir para manejar las conexiones udp, para evitar los falsos positivos 
+
+class UDPClientProtocol(asyncio.DatagramProtocol): #esta clase puede ser reutilizada o manejada como modulo fuera de este codigo, se deja aqui para que el mismo sea portable
+    def __init__(self):
+        self.transport = None
+        self.received = asyncio.Future()
+
+    def connection_made(self, transport):
+        self.transport = transport
+
+    def datagram_received(self, data, addr):
+        self.received.set_result((data, addr))
+
+    def error_received(self, exc):
+        self.received.set_exception(exc)
+
+    def connection_lost(self, exc):
+        if not self.received.done():
+            self.received.set_result(None)
 
 
 
@@ -38,7 +58,7 @@ baner= r"""
 """
 print ('\033[1;35m'+ baner +'\033[0m')
 
-##esta es la funcion para conectarnos mediante TCP e ipv4
+##esta es la funcion para conectarnos mediante TCP e ipv4 (falta agregar la deteccion de puertos)
 
 async def connect_tcp(ip, port, semaforo):            #esta funcion a sido modificada para manejar conexiones multiples, donde cada tarea tendra un tiempo de 2 seg
     count=0
@@ -59,18 +79,31 @@ async def connect_tcp(ip, port, semaforo):            #esta funcion a sido modif
         return count
             
 
-#esta es la funcion para conectarnos mediante UDP e ipv4 (aun debemos cambiarlo para que trabaje con async)
-
-def connect_udp(ip, port):
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+#esta es la funcion para conectarnos mediante UDP e ipv4 (la funcion mostrara si hay o no respuesta, ademas de que si esta cerrado (lo que nos da una posibilidad de ver puertos filtrados))
+async def connect_udp(ip, port, semaforo):
+    count=0
+    async with semaforo:
         try:
-            s.sendto(b'', (ip, port))
-        except Exception as e:
-            print(f'Error al enviar mensaje UDP: {e}')
+            loop = asyncio.get_event_loop()
+            transport, protocol = await loop.create_datagram_endpoint(lambda: UDPClientProtocol(), remote_addr=(ip, port))
+
+            transport.sendto(b'')
+            try:
+                await asyncio.wait_for(protocol.received, timeout=2)
+                print(f'puerto {port} abierto')
+                count -= 1
+            except asyncio.TimeoutError:
+                print(f'el puerto {port} puede estar filtrado')
+            transport.close()
+        except Exception:
+            count += 1
+    return count
+            
 
 #esta es la funcion que va a crear las tareas basandose en loas argumentos recibidos para pasarselos a la funcion de coneccion
 
-async def tareas(ip, ports, semaforo, delay):
+async def tareas(ip, ports, semaforo, delay, protocol):
+        if protocol == 'tcp':
             tasks=[]
             for port in ports:
                 tasks.append(asyncio.create_task(connect_tcp(ip, port, semaforo)))
@@ -79,6 +112,18 @@ async def tareas(ip, ports, semaforo, delay):
             total_errores= sum(resultados)
             print(f'{total_errores} puertos no conectados')
 
+        else:
+            tasks=[]
+            for port in ports:
+                tasks.append(asyncio.create_task(connect_udp(ip, port, semaforo)))
+                await asyncio.sleep(delay)
+            resultados = await asyncio.gather(*tasks)
+            total_errores= sum(resultados)
+            print(f'{total_errores} puertos no conectados')            
+
+
+
+
 #esta es la funcion principal que va a recibir y gestionar los parametros que le demos al programa
 async def main():
     parser = argparse.ArgumentParser(description='Simple herramienta de escaneo de puertos')
@@ -86,10 +131,9 @@ async def main():
     parser.add_argument('-p', dest='port', type=str, required=True, help='Puerto del servidor o un rango de puertos')
     parser.add_argument('-P', dest='protocol', type=str, choices=['tcp', 'udp'], default='tcp', help='Protocolo de conexión (tcp o udp)')
     parser.add_argument('-c', dest='conexiones', type=int, default=10, help='Cuantas conexiones que se iniciaran por segundo')
-    parser.add_argument('-max', dest='concurrentes', type=int, default=50, help='Conexiones simultaneas maximas !muchas pueden derivar en un dos o bloqueos')
+    parser.add_argument('-max', dest='concurrentes', type=int, default=20, help='Conexiones simultaneas maximas !muchas pueden derivar en un dos o bloqueos')
 
     args = parser.parse_args()                                      ##esto es importante, porque parseara los argumentos para que puedan ser usados en el codigo
-
     semaforo = asyncio.Semaphore(args.concurrentes)
     delay =1 /args.conexiones
         
@@ -103,10 +147,13 @@ async def main():
 
                                                                             #este condicional hara que se ejecuten tareas en paralelo por cada puerto pero en una  misma conexion socket
     if args.protocol == 'tcp':                                                  #si el argumento "protocolo" mantiene su valor por defecto, la conexion sera por tcp
-#        elif args.protocol == 'udp':                                                  #de lo contrario, la conexion sera UDP (aun debemos arreglar esta funcion para trabajar con async)
-#            connect_udp(args.ip, port)
-        await tareas(args.ip, ports, semaforo, delay)
-    await asyncio.gather(*asyncio.all_tasks() - {asyncio.current_task()})    
+        await tareas(args.ip, ports, semaforo, delay, args.protocol)
+
+    elif args.protocol == 'udp':                                                  #de lo contrario, la conexion sera UDP (aun debemos arreglar esta funcion para trabajar con async)
+        await tareas(args.ip, ports, semaforo, delay, args.protocol) 
+
+    await asyncio.gather(*asyncio.all_tasks() - {asyncio.current_task()})
+   
 
 
 if __name__ == '__main__':
