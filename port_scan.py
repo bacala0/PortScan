@@ -16,6 +16,9 @@ import signal
 import sys
 import asyncio
 
+#variables globales
+
+
 
 def cntrl_c(signal_recived, frame):         #esta funcion captura cuando el usuario quiere salir del programa para que no sea una salida abrupta y evitar errores innecesarios
     print('saliendo del Bacala0-Scan')
@@ -38,6 +41,7 @@ print ('\033[1;35m'+ baner +'\033[0m')
 ##esta es la funcion para conectarnos mediante TCP e ipv4
 
 async def connect_tcp(ip, port, semaforo):            #esta funcion a sido modificada para manejar conexiones multiples, donde cada tarea tendra un tiempo de 2 seg
+    count=0
     async with semaforo:
         try:
             reader, writer = await asyncio.wait_for(
@@ -49,10 +53,13 @@ async def connect_tcp(ip, port, semaforo):            #esta funcion a sido modif
             writer.close()
             await writer.wait_closed()
             print(f'puerto {port} abierto')
-        except Exception as e:
-            print(f'Error al conectarse al puerto {port} servidor {ip}: {e}') 
+            count-=1
+        except Exception:
+            count+=1
+        return count
+            
 
-##esta es la funcion para conectarnos mediante UDP e ipv4
+#esta es la funcion para conectarnos mediante UDP e ipv4 (aun debemos cambiarlo para que trabaje con async)
 
 def connect_udp(ip, port):
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
@@ -60,6 +67,17 @@ def connect_udp(ip, port):
             s.sendto(b'', (ip, port))
         except Exception as e:
             print(f'Error al enviar mensaje UDP: {e}')
+
+#esta es la funcion que va a crear las tareas basandose en loas argumentos recibidos para pasarselos a la funcion de coneccion
+
+async def tareas(ip, ports, semaforo, delay):
+            tasks=[]
+            for port in ports:
+                tasks.append(asyncio.create_task(connect_tcp(ip, port, semaforo)))
+                await asyncio.sleep(delay)
+            resultados = await asyncio.gather(*tasks)
+            total_errores= sum(resultados)
+            print(f'{total_errores} puertos no conectados')
 
 #esta es la funcion principal que va a recibir y gestionar los parametros que le demos al programa
 async def main():
@@ -85,15 +103,9 @@ async def main():
 
                                                                             #este condicional hara que se ejecuten tareas en paralelo por cada puerto pero en una  misma conexion socket
     if args.protocol == 'tcp':                                                  #si el argumento "protocolo" mantiene su valor por defecto, la conexion sera por tcp
-#        tarea = [connect_tcp(args.ip, port) for port in ports]
-        async def tareas():
-            for port in ports:
-                asyncio.create_task(connect_tcp(args.ip, port, semaforo))
-                await asyncio.sleep(delay)
-
-#        elif args.protocol == 'udp':                                                  #de lo contrario, la conexion sera UDP
+#        elif args.protocol == 'udp':                                                  #de lo contrario, la conexion sera UDP (aun debemos arreglar esta funcion para trabajar con async)
 #            connect_udp(args.ip, port)
-    await tareas()
+        await tareas(args.ip, ports, semaforo, delay)
     await asyncio.gather(*asyncio.all_tasks() - {asyncio.current_task()})    
 
 
