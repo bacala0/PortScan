@@ -6,10 +6,9 @@
 #lista de puertos por defecto y sus servicios comunes
 #captura de respuestas y cabeceras
 #debemos implementar el control de tareas por segundo {listo}
-#
+#agregaremos lectura de baner
 
 import __main__
-import socket
 import argparse
 import re
 import signal
@@ -58,7 +57,7 @@ baner= r"""
 """
 print ('\033[1;35m'+ baner +'\033[0m')
 
-##esta es la funcion para conectarnos mediante TCP e ipv4 (falta agregar la deteccion de puertos)
+##esta es la funcion para conectarnos mediante TCP e ipv4/ipv6 (falta agregar la deteccion de puertos)
 
 async def connect_tcp(ip, port, semaforo):            #esta funcion a sido modificada para manejar conexiones multiples, donde cada tarea tendra un tiempo de 2 seg
     count=0
@@ -79,7 +78,7 @@ async def connect_tcp(ip, port, semaforo):            #esta funcion a sido modif
         return count
             
 
-#esta es la funcion para conectarnos mediante UDP e ipv4 (la funcion mostrara si hay o no respuesta, ademas de que si esta cerrado (lo que nos da una posibilidad de ver puertos filtrados))
+#esta es la funcion para conectarnos mediante UDP e ipv4/ipv6 (la funcion mostrara si hay o no respuesta, ademas de que si esta cerrado (lo que nos da una posibilidad de ver puertos filtrados))
 async def connect_udp(ip, port, semaforo):
     count=0
     async with semaforo:
